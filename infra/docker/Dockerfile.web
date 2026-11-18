@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+# Production image for apps/web: a builder that runs `next build`, and a minimal
+# runtime that ships only the Next.js standalone output, running as a non-root user.
+# Requires `output: "standalone"` in apps/web/next.config.ts.
+# Build context is the repo root: docker build -f infra/docker/Dockerfile.web .
+
+# ---------- builder ----------
+FROM node:20-alpine AS builder
+WORKDIR /repo
+
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json .npmrc ./
+COPY apps/web/package.json apps/web/package.json
+COPY packages/core/package.json packages/core/package.json
+RUN pnpm install --filter @autotest/web... --frozen-lockfile --prod=false
+
+COPY packages/core packages/core
+COPY apps/web apps/web
+WORKDIR /repo/apps/web
+
+# NEXT_PUBLIC_ values are inlined at build time.
+ARG GIT_SHA=local
+ENV NEXT_PUBLIC_GIT_SHA=$GIT_SHA
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm build
+
+# ---------- runtime ----------
+FROM node:20-alpine AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=8080
+ENV HOSTNAME=0.0.0.0
+
+USER node
+
+COPY --from=builder --chown=node:node /repo/apps/web/.next/standalone ./
+COPY --from=builder --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=node:node /repo/apps/web/public ./apps/web/public
+
+EXPOSE 8080
+CMD ["node", "apps/web/server.js"]

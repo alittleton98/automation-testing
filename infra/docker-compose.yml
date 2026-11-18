@@ -1,0 +1,28 @@
+# The whole app from its two images: web on http://localhost:3000, api on http://localhost:3001.
+#   pnpm infra:up   (or: docker compose -f infra/docker-compose.yml up -d --build)
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.api
+    container_name: autotest-api
+    ports:
+      - '3001:8080'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:8080/health']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.web
+    container_name: autotest-web
+    environment:
+      API_URL: http://api:8080
+    ports:
+      - '3000:8080'
+    depends_on:
+      api:
+        condition: service_healthy
